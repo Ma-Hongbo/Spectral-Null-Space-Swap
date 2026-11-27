@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 RESULTS = ROOT / "results"
 TEXT_RESULTS = RESULTS / "TEXT" / "Qwen3-30B-A3B"
 VL_RESULTS = RESULTS / "VL"

@@ -1,188 +1,136 @@
-# Spectral Nullspace Swap
+# Spectral Null Space Swap
 
-本仓库用于在两个结构一致的 Hugging Face 模型检查点之间执行 spectral
-subspace swap。给定 Base 模型权重 $W_{base}$ 和 Thinking 模型权重
-$W_{thinking}$，脚本构造：
+给定架构一致的 Instruct（Base）和 Thinking 检查点，本方法对目标权重矩阵构造
+$W_{\mathrm{swap}} = P_S(W_{\mathrm{base}}) + (I-P_S)(W_{\mathrm{thinking}})$。
+$S$ 由 Base 矩阵前 $k$ 个左右奇异向量定义，其中
+$k=\lceil \mathrm{ratio}\cdot\min(d_{out},d_{in})\rceil$。
+Base 提供主奇异子空间内的权重，Thinking 提供其正交补内的权重。
 
-$$
-W_{mix}=P_S(W_{base})+(I-P_S)(W_{thinking}),
-$$
+## 快速开始
 
-其中 $S$ 由 $W_{base}$ 的前 $k$ 个左右奇异向量定义，
-$k=\lceil ratio\cdot\min(d_{out},d_{in})\rceil$。
+以下命令从仓库根目录执行。示例使用 Qwen3-4B Instruct/Thinking 2507 和 GSM8K，
+可以先评测 8 道题，再用同一流程跑全量对比。已有本地权重时，直接将变量指向模型目录即可。
 
-该方法在 Base 的主奇异子空间内保留 Base 权重，在其正交补空间内使用
-Thinking 权重。Thinking 权重及其更新不会进行额外的低秩截断。
+### 1. 配置环境和模型
 
-## 目录结构
-
-```text
-spectral_nullspace_swap/
-├── model/
-│   └── subspace_swap.py
-├── eval/
-│   └── evals/
-├── scripts/
-├── requirements.txt
-└── README.md
-```
-
-## 环境配置
-
-推荐使用 Conda 创建独立环境。主 Text/VL 实验记录的环境为 Python
-3.10.19、PyTorch 2.9.0、Transformers 4.57.5 和 vLLM 0.11.2。
+文本和视觉评测使用 Linux、NVIDIA GPU 和 Python 3.10。依赖锁定在
+[requirements.txt](requirements.txt)，包括 PyTorch 2.9.0、Transformers 4.57.5 和 vLLM 0.11.2。
 
 ```bash
-conda create -n spectral-swap python=3.10.19 -y
+git clone https://github.com/Ma-Hongbo/Spectral-Null-Space-Swap.git
+cd Spectral-Null-Space-Swap
+conda create -n spectral-swap python=3.10 -y
 conda activate spectral-swap
-python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+
+BASE=checkpoints/Qwen3-4B-Instruct-2507
+THINKING=checkpoints/Qwen3-4B-Thinking-2507
+SWAP=checkpoints/Qwen3-4B-Swap-ratio-0.5
+hf download Qwen/Qwen3-4B-Instruct-2507 --local-dir "$BASE"
+hf download Qwen/Qwen3-4B-Thinking-2507 --local-dir "$THINKING"
 ```
 
-如果只运行 `subspace_swap.py`，不进行生成和评测，只需要安装核心依赖：
+只构造权重时，可以在独立环境里安装 `torch==2.9.0` 和 `safetensors==0.7.0`。
+CUDA 安装方式取决于 NVIDIA 驱动和所用的 PyTorch/vLLM wheel。两份输入模型和一份构造结果各需要一份完整 checkpoint 的磁盘空间。
 
-```bash
-python -m pip install torch==2.9.0 safetensors==0.7.0
-```
-
-GPU 版本的 PyTorch 需要与机器上的 NVIDIA 驱动及 CUDA 环境兼容。如果集群
-使用特定的 PyTorch wheel，请先按照集群配置安装 `torch==2.9.0`，再安装
-`requirements.txt` 中的其余依赖。
-
-Qwen3-Omni 音频评测使用另一套独立环境，不能与上述 vLLM 环境混装；具体版本
-已经记录在 `requirements.txt` 末尾。仅构造模型权重时不需要 Omni 环境。
-
-## 输入模型要求
-
-`--base` 和 `--thinking` 必须指向本地 Hugging Face 模型目录，并满足：
-
-- 两个模型结构一致，待处理权重的名称和形状一致；
-- 权重采用 `safetensors` 格式；
-- 支持单文件 `model.safetensors`；
-- 支持带有 `model.safetensors.index.json` 的分片检查点；
-- 输出目录需要至少容纳一个完整模型检查点。
-
-脚本处理以下线性权重：
-
-- Attention：`q_proj`、`k_proj`、`v_proj`、`o_proj`；
-- MLP：`gate_proj`、`up_proj`、`down_proj`，包括 MoE experts；
-- Qwen3-VL Vision：`qkv`、`proj`、`linear_fc1`、`linear_fc2`。
-
-Embedding、Norm、LM head、router 和其他非目标权重直接保留 Base 模型权重。
-模型配置、tokenizer 和 chat template 等元数据从 Thinking 模型目录复制。
-
-## 基本用法
-
-在仓库根目录运行：
+### 2. 构造 Swap 模型
 
 ```bash
 python model/subspace_swap.py \
-  --base /path/to/base-model \
-  --thinking /path/to/thinking-model \
-  --out /path/to/output-model-ratio-0.5 \
-  --ratio 0.5 \
-  --device cuda:0
+  --base "$BASE" --thinking "$THINKING" --out "$SWAP" \
+  --ratio 0.5 --device cuda:0
 ```
 
-参数说明：
+输出目录包含 safetensors、模型索引、Thinking 的配置和 tokenizer，以及
+`subspace_swap_stats.json`。检查其中的 `projected_matrices`、`max_subspace_error`
+和 `max_complement_error` 可以确认有目标矩阵被处理，并查看 FP32 投影误差。
+输出浮点权重保存为 FP16。
 
-| 参数 | 含义 |
+### 3. 评测构造后的模型
+
+下载 [GSM8K](https://huggingface.co/datasets/openai/gsm8k) 的 `main/test`，
+转换成带最终答案指令的 JSONL。下面的冒烟评测每题生成一次，随后用 CPU 规则评分。
+
+```bash
+python eval/evals/prepare_gsm8k.py
+
+OUT=results/smoke/GSM8K
+python eval/evals/gen_vllm.py \
+  --model "$SWAP" --tasks GSM8K --output-dir "$OUT" \
+  --backend vllm --gpus 0 --dtype float16 \
+  --limit 8 --seeds 101 --max-tokens 2048 --max-model-len 4096
+
+python eval/evals/grade.py --eval-dir "$OUT" --disable-verifier --write-details
+```
+
+生成目录包含回答 JSONL 和 `generation_manifest.json`。评分写入
+`grading_results.json`，可查看 `avg_at_n`（平均 rollout 正确率）、
+`pass_at_n`（至少一次答对的题目占比）、`avg_token_length` 和 `truncation_rate`。
+`--write-details` 另外输出逐题评分。冒烟评测只用于检查流程，较短的生成上限可能截断 Thinking 输出。
+
+### 4. 在同一设置下比较三种模型
+
+下例使用全量 GSM8K、四个种子和相同的生成预算。可以按显存调整 `--max-model-len`
+和 `--max-tokens`，为输入提示留出上下文空间。对比时三种模型使用同一设置和评分方式。
+
+```bash
+for variant in instruct thinking swap; do
+  case "$variant" in
+    instruct) MODEL="$BASE" ;;
+    thinking) MODEL="$THINKING" ;;
+    swap) MODEL="$SWAP" ;;
+  esac
+  OUT="results/Qwen3-4B/$variant/GSM8K"
+  python eval/evals/gen_vllm.py \
+    --model "$MODEL" --tasks GSM8K --output-dir "$OUT" \
+    --backend vllm --gpus 0 --dtype float16 \
+    --seeds 101,202,303,404 --max-tokens 32768 --max-model-len 40960 || break
+  python eval/evals/grade.py --eval-dir "$OUT" --disable-verifier || break
+done
+```
+
+## 评测入口
+
+| 用途 | 入口 |
 | --- | --- |
-| `--base` | Base/Instruct 模型目录 |
-| `--thinking` | Thinking 模型目录 |
-| `--out` | 输出模型目录；不同 ratio 应使用不同目录 |
-| `--ratio` | Base 主奇异子空间的秩比例，范围为 `(0, 1]`，默认 `0.10` |
-| `--device` | 执行 FP32 SVD 和投影的设备，默认 `cuda:0`；也可设为 `cpu` |
-| `--only-shard` | 只构造指定权重分片，可重复传入 |
-| `--skip-finalize` | 只写权重分片和 worker 统计，不生成最终索引 |
-| `--finalize-only` | 所有分片完成后，仅生成索引、配置和合并统计 |
+| 文本与视觉生成 | [gen_vllm.py](eval/evals/gen_vllm.py)，支持 vLLM 和 Transformers |
+| 文本、数学与 MMMU 评分 | [grade.py](eval/evals/grade.py)，支持规则评分和 CompassVerifier |
+| MathVista / ARKitScenes | [prepare_new_vl_benchmarks.py](eval/evals/prepare_new_vl_benchmarks.py) 准备输入，[grade_new_vl.py](eval/evals/grade_new_vl.py) 评分 |
+| Qwen3-Omni | [gen_omni_vllm.py](eval/evals/gen_omni_vllm.py) 生成文本，[gen_omni_audio_vllm.py](eval/evals/gen_omni_audio_vllm.py) 生成音频任务答案，[grade_omni_audio.py](eval/evals/grade_omni_audio.py) 评分 |
 
-`ratio` 越大，使用 Base 权重的主子空间越大；`ratio=1` 时，所有目标矩阵
-都退化为 Base 权重。较小的 ratio 会在更多方向上保留 Thinking 权重。
+其他 benchmark 可通过 `--tasks AIME25 --task-path AIME25=/path/to/test.jsonl`
+指定输入。通用生成器接受 JSONL、JSON 和 Parquet。简单文本样本可用
+`{"question":"What is 2 + 2?","answer":"4"}`，也支持 chat `messages`。
+视觉任务用 `--modality VL`，并为本地 `file://` 图片设置
+`--allowed-local-media-path /path/to/images`。启动 GPU 推理前可在生成命令后加
+`--dry-run`，检查样本数、设备和解码配置。
 
-计算过程使用 FP32，最终权重以 FP16 保存。
+`--gpus` 接收物理 GPU 编号，默认 `0`。`--gpus 0,1 --tp 2` 将一个
+vLLM 实例分配到两张卡，`--gpus 0,1 --tp 1` 则将样本分给两个实例。
+若使用原实验允许范围之外的编号，显式传入 `--allow-other-gpus`。
+重跑相同输出可指定新目录，或用 `--overwrite` 替换已有生成。
 
-## 分片并行构造
+默认评分可在规则未判对时使用 CompassVerifier。快速开始显式关闭它；需要使用
+verifier 时，可运行 `CUDA_VISIBLE_DEVICES=0 python eval/evals/grade.py --eval-dir "$OUT" --model /path/to/CompassVerifier-3B`。
+LiveCodeBench 和 BFCL 的官方评分还需要在 `references/LiveCodeBench` 和
+`references/gorilla` 分别准备对应上游评测代码和依赖。
 
-对于分片模型，可以让不同 GPU 分别处理不同的 safetensors shard。首先查看
-Base 模型的分片名称：
+Omni 专用 runner 使用 `requirements.txt` 末尾记录的独立环境。将
+`QWEN_OMNI_VLLM_SOURCE` 指向包含
+`vllm/model_executor/models/qwen3_omni_moe_thinker.py` 的源码 checkout，
+启动时将 `eval/evals` 加入 `PYTHONPATH`，以便 vLLM worker 加载兼容代码。
+音频输入可用 [prepare_omni_audio_data.py](eval/evals/prepare_omni_audio_data.py) 的
+`--audio-root`、`--only` 和 `--prepared-root` 指定数据及输出位置。运行音频生成需要系统提供
+FFmpeg。音频评分通过 `--input` 接收生成的 JSONL 文件。
 
-```bash
-ls /path/to/base-model/*.safetensors
-```
+## 权重构造与实验脚本
 
-然后启动多个 worker。所有 worker 必须使用相同的 Base、Thinking、输出目录和
-ratio，每个 worker 负责不同的 shard：
+`model/subspace_swap.py` 支持单文件和分片的 Hugging Face safetensors 模型。
+它处理同名同形状的 Attention、MLP（含 MoE experts）和 Qwen3-VL Vision
+目标矩阵。其余权重取自 Base，配置和 tokenizer 取自 Thinking。请为每组输入和
+ratio 使用独立输出目录。`ratio=1` 取全部可用奇异方向；矩形矩阵仍可能存在正交补。
 
-```bash
-CUDA_VISIBLE_DEVICES=0 python model/subspace_swap.py \
-  --base /path/to/base-model \
-  --thinking /path/to/thinking-model \
-  --out /path/to/output-model-ratio-0.5 \
-  --ratio 0.5 \
-  --device cuda:0 \
-  --only-shard model-00001-of-00002.safetensors \
-  --skip-finalize &
-
-CUDA_VISIBLE_DEVICES=1 python model/subspace_swap.py \
-  --base /path/to/base-model \
-  --thinking /path/to/thinking-model \
-  --out /path/to/output-model-ratio-0.5 \
-  --ratio 0.5 \
-  --device cuda:0 \
-  --only-shard model-00002-of-00002.safetensors \
-  --skip-finalize &
-
-wait
-```
-
-全部 worker 完成后执行一次 finalize：
-
-```bash
-python model/subspace_swap.py \
-  --base /path/to/base-model \
-  --thinking /path/to/thinking-model \
-  --out /path/to/output-model-ratio-0.5 \
-  --ratio 0.5 \
-  --finalize-only
-```
-
-只有在所有预期分片均已生成后，finalize 才会成功。
-
-## 输出文件
-
-成功完成后，输出目录包含：
-
-- 构造后的 `*.safetensors` 权重分片；
-- `model.safetensors.index.json`；
-- 从 Thinking 模型复制的配置和 tokenizer 文件；
-- `subspace_swap_stats.json`，记录整体参数和数值误差；
-- 分片并行时产生的 `subspace_swap_stats_*.json` worker 统计。
-
-统计文件中的 `subspace_error` 和 `complement_error` 用于检查目标分解是否满足：
-
-$$
-P_S(W_{mix})=P_S(W_{base}),
-$$
-
-$$
-(I-P_S)(W_{mix})=(I-P_S)(W_{thinking}).
-$$
-
-## 常见问题
-
-### CUDA out of memory
-
-脚本会对每个目标矩阵执行完整 FP32 SVD。降低 `ratio` 不会减少完整 SVD 的主要
-显存开销。可以减少同一 GPU 上的并发 worker 数量，换用显存更大的 GPU，或者
-使用 `--device cpu`，但 CPU SVD 会明显更慢。
-
-### Shape mismatch
-
-这通常表示 Base 和 Thinking 不是同一模型架构或不是可逐层对应的检查点。请
-确认两个目录中的模型规模、层数、hidden size 和 MoE 配置一致。
-
-### Unknown safetensors shard
-
-`--only-shard` 必须使用 Base 模型索引中记录的完整文件名。可从
-`model.safetensors.index.json` 或模型目录中的文件名确认。
+- 单卡显存不足时，可用 `--device cpu`。构造时对每个目标矩阵运行完整 FP32 SVD，降低 ratio 不会降低这一步的主要开销。
+- 分片并行时，启动多个进程，每个进程使用相同的 Base、Thinking、ratio 和输出目录，并指定不同的 `--only-shard <索引中的完整分片名> --skip-finalize`。所有进程成功后，用同样的参数运行一次 `--finalize-only`，生成模型索引和合并后的统计。
+- [scripts/](scripts/) 下的 `build_*_sar_ratio_sweep.py` 用于一次构造多个 ratio，支持 Qwen3-4B、Qwen3-30B-A3B 和 Qwen3-VL。用对应脚本的 `--help` 查看输入和 GPU 参数。
+- [scripts/archive/](scripts/archive/) 保存原实验的单机队列和控制器，其中有实验机路径、GPU 编号和矩阵更新约定。[eval/legacy/](eval/legacy/) 保存旧的顺序生成、LoRA 和 exam 入口。

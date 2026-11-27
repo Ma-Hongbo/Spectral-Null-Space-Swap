@@ -9,6 +9,7 @@ pieces without modifying the installed vLLM package.
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 
@@ -59,14 +60,21 @@ import vllm  # noqa: E402,F401
 
 
 _SOURCE_ROOT = Path(
-    "/home/hongbo/.cache/sar-reproduction/vllm-qwen3-omni-ca66cbf"
-)
+    os.environ.get(
+        "QWEN_OMNI_VLLM_SOURCE",
+        str(Path.home() / ".cache/sar-reproduction/vllm-qwen3-omni-ca66cbf"),
+    )
+).expanduser()
 _SOURCE_FILE = _SOURCE_ROOT / "vllm/model_executor/models/qwen3_omni_moe_thinker.py"
 _MODULE_NAME = "vllm.model_executor.models.qwen3_omni_moe_thinker"
 
 if _MODULE_NAME in sys.modules:
     _implementation = sys.modules[_MODULE_NAME]
 else:
+    if not _SOURCE_FILE.is_file():
+        raise ImportError(
+            f"Missing {_SOURCE_FILE}. Set QWEN_OMNI_VLLM_SOURCE to the vLLM source checkout."
+        )
     _spec = importlib.util.spec_from_file_location(_MODULE_NAME, _SOURCE_FILE)
     if _spec is None or _spec.loader is None:
         raise ImportError(f"cannot load Qwen3-Omni vLLM implementation from {_SOURCE_FILE}")

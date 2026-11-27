@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 
-ROOT = Path("/home/hongbo/sar-reproduction")
+ROOT = Path(__file__).resolve().parents[2]
 RESULTS = ROOT / "results"
 TIES_ROOT = Path("/mnt/disk3/hongbo/sar/ties-models")
 DATA_ROOT = ROOT / "eval/data"
@@ -626,9 +626,10 @@ def task_command(task: Task, cards: tuple[int, ...]) -> tuple[list[str], str]:
         commands = []
         if not grading_done:
             commands.append(shlex.join(grading_command(task, cards)))
-        commands.append(
-            shlex.join([str(PYTHON), str(UPDATE_OMNI_THINKING_GSM8K)])
-        )
+        if UPDATE_OMNI_THINKING_GSM8K.is_file():
+            commands.append(shlex.join([str(PYTHON), str(UPDATE_OMNI_THINKING_GSM8K)]))
+        if not commands:
+            return ["true"], "priority grading already complete"
         return [
             "bash",
             "-lc",

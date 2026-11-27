@@ -23,13 +23,13 @@ from pathlib import Path
 from typing import Any
 
 
-ROOT = Path("/home/hongbo/sar-reproduction")
+ROOT = Path(__file__).resolve().parents[2]
 RESULTS = ROOT / "results"
 LOG_ROOT = RESULTS / "_queue_logs"
 AR_PYTHON = Path("/home/hongbo/.conda/envs/ar/bin/python")
 GEN_VL = ROOT / "eval/evals/gen_vllm.py"
 GRADE_VL = ROOT / "eval/evals/grade_new_vl.py"
-OMNI_QUEUE = ROOT / "eval/evals/run_omni_replacement_queue.py"
+OMNI_QUEUE = ROOT / "scripts/archive/run_omni_replacement_queue.py"
 DATA_DIR = ROOT / "eval/data"
 MATHVISTA_DATA = DATA_DIR / "VL_MathVista/testmini.jsonl"
 MEDIA_ROOT = Path("/data/hongbo/datasets/MathVista")

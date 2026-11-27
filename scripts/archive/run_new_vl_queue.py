@@ -17,7 +17,7 @@ from collections import deque
 from pathlib import Path
 
 
-ROOT = Path("/home/hongbo/sar-reproduction")
+ROOT = Path(__file__).resolve().parents[2]
 PYTHON = Path("/home/hongbo/.conda/envs/ar/bin/python")
 RUNNER = ROOT / "eval/evals/gen_vllm.py"
 GRADER = ROOT / "eval/evals/grade_new_vl.py"

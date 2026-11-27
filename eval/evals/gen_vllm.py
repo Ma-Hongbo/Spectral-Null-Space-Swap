@@ -47,12 +47,12 @@ TASK_REGISTRY = {
     "BRUMO25": "BRUMO25/test.parquet",
     "CMIMC25": "CMIMC25/test.parquet",
     "HMMT25": "HMMT25/test.parquet",
+    "GSM8K": "GSM8K/test.jsonl",
     # These are normally supplied with --task-path because their official
     # runners use benchmark-specific formats.
     "LiveCodeBench": None,
     "BFCL": None,
     "MMLU": None,
-    "GSM8K": None,
     "MMMU": None,
     "MathVista-testmini": "VL_MathVista/testmini.jsonl",
     "ARKitScenes": "VL_ARKitScenes/test.jsonl",
@@ -1010,12 +1010,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Restrict generation to the first N examples (intended for smoke tests)",
     )
 
-    parser.add_argument("--gpus", default="1,2,5,6,7,8", help="Comma-separated physical GPU ids")
+    parser.add_argument("--gpus", default="0", help="Comma-separated physical GPU ids (default: 0)")
     parser.add_argument("--tensor-parallel-size", "--tp", type=int, default=1)
     parser.add_argument(
         "--allow-other-gpus",
         action="store_true",
-        help="Allow ids outside the experiment's 1,2,5,6,7,8 allow-list",
+        help="Allow explicit GPU ids outside the original cluster allow-list",
     )
 
     parser.add_argument("--seeds", default=",".join(map(str, DEFAULT_SEEDS)))

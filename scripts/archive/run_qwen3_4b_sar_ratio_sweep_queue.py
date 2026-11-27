@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 RESULTS = ROOT / "results"
 DATA_ROOT = ROOT / "eval/data"
 MODEL_ROOT = Path("/mnt/disk3/hongbo/sar-models/qwen3-4b-sar-ratio-sweep")

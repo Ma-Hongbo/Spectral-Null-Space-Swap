@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 RESULTS = ROOT / "results"
 LOG_ROOT = RESULTS / "_queue_logs" / "qwen3_omni_sar_ratio_followup"
 CONTROLLER_LOG = LOG_ROOT / "controller.log"

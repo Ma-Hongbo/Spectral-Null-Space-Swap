@@ -10,19 +10,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import random
 import re
-import shutil
 import tarfile
 from pathlib import Path
 from typing import Any, Iterable
 
 
-ROOT = Path("/home/hongbo/sar-reproduction")
-DEFAULT_AUDIO_ROOT = Path("/data/hongbo/audio_benchmarks")
-DEFAULT_PREPARED = DEFAULT_AUDIO_ROOT / "prepared"
-MMAR_REPO = Path("/tmp/sar-audio-eval-20260826/MMAR")
+DEFAULT_AUDIO_ROOT = Path(__file__).resolve().parents[1] / "data/omni_audio"
 
 
 def _clean_choice(value: Any) -> str:
@@ -285,13 +280,14 @@ def prepare_mmsu(parquet_paths: list[Path], output_dir: Path, sample_seed: int, 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--audio-root", type=Path, default=DEFAULT_AUDIO_ROOT)
-    parser.add_argument("--prepared-root", type=Path, default=DEFAULT_PREPARED)
+    parser.add_argument("--prepared-root", type=Path, help="Default: AUDIO_ROOT/prepared")
+    parser.add_argument("--mmar-metadata", type=Path, help="Default: AUDIO_ROOT/MMAR/MMAR-meta.jsonl")
     parser.add_argument("--sample-seed", type=int, default=202)
     parser.add_argument("--mmsu-sample-size", type=int, default=1000)
     parser.add_argument("--only", choices=("MMAU", "MMAR", "MMSU", "all"), default="all")
     args = parser.parse_args()
-    audio_root = args.audio_root.resolve()
-    prepared_root = args.prepared_root.resolve()
+    audio_root = args.audio_root.expanduser().resolve()
+    prepared_root = (args.prepared_root or audio_root / "prepared").expanduser().resolve()
     prepared_root.mkdir(parents=True, exist_ok=True)
 
     if args.only in ("MMAU", "all"):
@@ -302,7 +298,7 @@ def main() -> int:
         print(f"MMAU prepared rows={count}", flush=True)
     if args.only in ("MMAR", "all"):
         count = prepare_mmar(
-            MMAR_REPO / "MMAR-meta.jsonl",
+            (args.mmar_metadata or audio_root / "MMAR/MMAR-meta.jsonl").expanduser(),
             audio_root / "MMAR" / "mmar-audio.tar.gz",
             prepared_root / "MMAR",
         )

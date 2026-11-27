@@ -1244,7 +1244,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--allow-other-gpus",
         action="store_true",
-        help="Allow ids outside the experiment's 1,2,5,6,7,8 allow-list",
+        help="Allow explicit GPU ids outside the original cluster allow-list",
     )
     parser.add_argument("--dtype", default="bfloat16")
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.98)

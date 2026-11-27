@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 
-ROOT = Path("/home/hongbo/sar-reproduction")
+ROOT = Path(__file__).resolve().parents[2]
 GEN_PYTHON = Path(
     os.environ.get(
         "OMNI_GEN_PYTHON",

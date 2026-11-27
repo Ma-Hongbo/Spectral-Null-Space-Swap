@@ -4,5 +4,8 @@ __pycache__/
 .venv/
 checkpoints/
 eval/data/
+interpretability/*/data/
+interpretability/**/*.pdf
+interpretability/**/*.png
 references/
 results/

@@ -31,28 +31,8 @@ _<h4>Spectral Null-Space Swap Makes Reasoning Models Efficient</h4>_
 ![image](./assets/overview.png)
 
 ## News
-* [2026/11/27] We release our code and evaluation suite on GitHub.
+* [2026/11/27] We release our code, evaluation suite, and mechanistic analysis scripts on GitHub.
 * [2026/09/29] Our [paper](https://arxiv.org/abs/2609.37976) is available on arXiv.
-
-## Overview
-
-**Spectral Null-Space Swap ($S^3$)** is a training-free weight-space composition method that combines an architecture-matched **Instruct (Base)** checkpoint and **Thinking** checkpoint without low-rank truncation, compressing reasoning chains while preserving or improving task accuracy.
-
-For every target linear layer with Base weight $W_{\mathrm{base}} \in \mathbb{R}^{d_{\mathrm{out}} \times d_{\mathrm{in}}}$ and Thinking weight $W_{\mathrm{thinking}} \in \mathbb{R}^{d_{\mathrm{out}} \times d_{\mathrm{in}}}$, let $U_k \in \mathbb{R}^{d_{\mathrm{out}} \times k}$ and $V_k \in \mathbb{R}^{d_{\mathrm{in}} \times k}$ denote the top-$k$ left and right singular vectors of $W_{\mathrm{base}}$, where
-
-$$
-k = \max\!\left(1,\, \lceil \mathrm{ratio} \cdot \min(d_{\mathrm{out}}, d_{\mathrm{in}}) \rceil\right), \qquad \mathrm{ratio} \in (0, 1].
-$$
-
-Defining $P_S(W) = U_k U_k^\top W V_k V_k^\top$ as the orthogonal Frobenius projection onto the principal singular subspace $S = \mathrm{span}(U_k) \otimes \mathrm{span}(V_k)$, the merged weight is constructed as:
-
-$$
-W_{\mathrm{swap}} = P_S(W_{\mathrm{base}}) + (I - P_S)(W_{\mathrm{thinking}}).
-$$
-
-- **Principal subspace ($S$):** Preserves the exact leading spectral components of the **Base / Instruct** model ($P_S(W_{\mathrm{swap}}) = P_S(W_{\mathrm{base}})$).
-- **Null-space / orthogonal complement ($S^\perp$):** Injects the full **Thinking** weights outside $S$ ($(I - P_S)(W_{\mathrm{swap}}) = (I - P_S)(W_{\mathrm{thinking}})$) **without** low-rank truncating $W_{\mathrm{thinking}}$.
-- **Non-target tensors & metadata:** Embeddings, normalization layers, routers, and `lm_head` are copied from **Base**; `config.json`, tokenizer files, and the chat template are copied from **Thinking**.
 
 ---
 
@@ -90,7 +70,13 @@ Spectral-Null-Space-Swap/
 │   │   ├── grade_omni_audio.py         # Audio multiple-choice grader
 │   │   └── utils.py                    # Symbolic SymPy / LaTeX answer equivalence checker
 │   └── README.md                       # Detailed CLI reference, task formats & output schemas
-├── requirements.txt                    # Main environment (Text & VL build + evaluation, Python 3.10)
+├── interpretability/                   # Mechanistic analysis & probe experiments (§4.1, §5, App. A)
+│   ├── entropy/                        # Attention-entropy concentration & pretraining saturation
+│   ├── corollary_check/                # Empirical check of <ΔW_perp, G_perp> < 0 across 7 datasets
+│   ├── hallucination/                  # SimpleQA & TruthfulQA hallucination evaluation + MoE probes
+│   ├── norm_decomposition/             # Parameter- vs. function-space norms & random-subspace controls
+│   └── README.md                       # Probe definitions, S3_ROOT setup & experiment commands
+├── requirements.txt                    # Main environment (Text/VL eval + interpretability, Python 3.10)
 └── requirements/
     ├── minimal.txt                     # Lightweight environment (checkpoint construction only)
     └── omni.txt                        # Isolated Qwen3-Omni environment (Python 3.11, vLLM 0.9.2)
@@ -102,7 +88,7 @@ Spectral-Null-Space-Swap/
 
 Choose the environment profile that matches your workflow. Ensure your PyTorch / vLLM wheels match the host NVIDIA driver and CUDA toolkit.
 
-### 1. Standard Environment (Checkpoint Construction + Text/VL Evaluation)
+### 1. Standard Environment (Checkpoint Construction + Evaluation + Interpretability)
 
 Tested on Linux with NVIDIA GPUs and **Python 3.10** (`PyTorch 2.9.0`, `Transformers 4.57.5`, `vLLM 0.11.2`):
 
@@ -255,6 +241,21 @@ See [`model/README.md`](model/README.md) and [`scripts/README.md`](scripts/READM
 - **Optional LLM verifier:** `grade.py` supports `opencompass/CompassVerifier-3B` fallback grading for responses that do not match symbolic rules; pass `--disable-verifier` for pure CPU rule grading, or `--model /path/to/CompassVerifier-3B --gpus 0` to enable it.
 
 For complete dataset schemas, custom benchmark setup, and Qwen3-Omni vLLM plugin configuration, see [`eval/README.md`](eval/README.md).
+
+---
+
+## Mechanistic Interpretability
+
+[`interpretability/`](interpretability/) contains the probe experiments and mechanistic analyses from **Section 4.1**, **Section 5**, and **Appendix A** of the paper. Decomposing the post-training update $\Delta W = W_t - W_0 = \Delta W_\parallel + \Delta W_\perp$ around the full spectral subspace of $W_0$ ($\rho = 1$) yields four probe checkpoints — **Base** ($W_0$), **Sub** ($W_0 + \Delta W_\parallel$), **Null** ($W_0 + \Delta W_\perp$), and **Full** ($W_t$) — evaluated across four modules:
+
+| Module | Paper Section | What It Analyzes |
+| --- | --- | --- |
+| [`interpretability/entropy/`](interpretability/entropy/) | §5.1, App. A.1 / A.2 / A.4 | Attention-entropy concentration ($H_{\mathrm{Null}} < H_{\mathrm{Base}} < H_{\mathrm{Sub}}$) in layers 32–35, top-$k$ attention weights, per-problem scatter, and Pythia pretraining entropy saturation |
+| [`interpretability/corollary_check/`](interpretability/corollary_check/) | §5.2, App. A | Empirical verification of the first-order negative alignment $\langle \Delta W_\perp, G_\perp \rangle < 0$ between the null-space update and the attention-entropy gradient across 7 math benchmarks |
+| [`interpretability/hallucination/`](interpretability/hallucination/) | App. A.3 | Factual accuracy, abstention, and hallucination rates on SimpleQA & TruthfulQA, plus dense/MoE `perp` and `subonly` probe builders |
+| [`interpretability/norm_decomposition/`](interpretability/norm_decomposition/) | §4.1 (Fig. 1) | Parameter-space Frobenius norms vs. function-space hidden-state displacement norms ($\|\Delta h_*^{(\ell)}\|$) and dimension-matched random-subspace controls |
+
+All interpretability scripts read checkpoint locations from `S3_ROOT/paths2507.env` (without hardcoded cluster paths). See [`interpretability/README.md`](interpretability/README.md) for setup instructions and per-module commands.
 
 ---
 

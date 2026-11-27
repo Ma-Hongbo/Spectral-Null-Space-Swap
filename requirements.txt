@@ -28,3 +28,6 @@ scipy==1.15.3
 sympy==1.14.0
 pylatexenc==2.10
 tqdm==4.67.3
+
+# Mechanistic interpretability & figure plotting (interpretability/)
+matplotlib>=3.8.0

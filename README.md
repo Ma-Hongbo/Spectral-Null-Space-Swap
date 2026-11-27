@@ -1,6 +1,42 @@
-# Spectral Null Space Swap
+<p align="center">
+    <!-- license badge -->
+    <a href="https://opensource.org/licenses/Apache-2.0">
+        <img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"></a>
+    <!-- stars badge -->
+    <a href="https://github.com/Ma-Hongbo/Spectral-Null-Space-Swap/stargazers">
+        <img alt="GitHub stars" src="https://img.shields.io/github/stars/Ma-Hongbo/Spectral-Null-Space-Swap?style=social"/>
+    </a>
+    <!-- pull requests badge -->
+    <a href="https://github.com/Ma-Hongbo/Spectral-Null-Space-Swap/pulls">
+        <img alt="Pull Requests" src="https://img.shields.io/github/issues-pr/Ma-Hongbo/Spectral-Null-Space-Swap"/>
+    </a>
+</p>
 
-**Spectral Null Space Swap** merges an architecture-matched **Instruct (Base)** checkpoint and **Thinking** checkpoint in weight space without low-rank truncation.
+<div align="center">
+
+S<sup>3</sup>: Spectral Null-Space Swap
+===========================
+_<h4>Spectral Null-Space Swap Makes Reasoning Models Efficient</h4>_
+
+
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px; justify-content: center;">
+    <a href='https://arxiv.org/abs/2609.37976'><img src='https://img.shields.io/badge/arxiv-2609.37976-b31b1b?logo=arxiv&logoColor=red'></a>
+    <a href='https://arxiv.org/pdf/2609.37976'><img src='https://img.shields.io/badge/Paper-PDF-green?logo=adobeacrobatreader&logoColor=green'></a>
+</div>
+
+> ##### [Hongbo Ma*](https://ma-hongbo.github.io/), [Sansheng Cao*](https://arxiv.org/search/cs?searchtype=author&query=Cao,+Sansheng), [Jiajun Fan](https://www.jiajunfan.com/), [Bangji Yang](https://openreview.net/profile?id=~Bangji_Yang1), [Ge Liu](https://www.mit.edu/~geliu/)
+
+</div>
+
+![image](./assets/overview.png)
+
+## News
+* [2026/11/27] We release our code and evaluation suite on GitHub.
+* [2026/09/29] Our [paper](https://arxiv.org/abs/2609.37976) is available on arXiv.
+
+## Overview
+
+**Spectral Null-Space Swap ($S^3$)** is a training-free weight-space composition method that combines an architecture-matched **Instruct (Base)** checkpoint and **Thinking** checkpoint without low-rank truncation, compressing reasoning chains while preserving or improving task accuracy.
 
 For every target linear layer with Base weight $W_{\mathrm{base}} \in \mathbb{R}^{d_{\mathrm{out}} \times d_{\mathrm{in}}}$ and Thinking weight $W_{\mathrm{thinking}} \in \mathbb{R}^{d_{\mathrm{out}} \times d_{\mathrm{in}}}$, let $U_k \in \mathbb{R}^{d_{\mathrm{out}} \times k}$ and $V_k \in \mathbb{R}^{d_{\mathrm{in}} \times k}$ denote the top-$k$ left and right singular vectors of $W_{\mathrm{base}}$, where
 
@@ -15,7 +51,7 @@ W_{\mathrm{swap}} = P_S(W_{\mathrm{base}}) + (I - P_S)(W_{\mathrm{thinking}}).
 $$
 
 - **Principal subspace ($S$):** Preserves the exact leading spectral components of the **Base / Instruct** model ($P_S(W_{\mathrm{swap}}) = P_S(W_{\mathrm{base}})$).
-- **Orthogonal complement ($S^\perp$):** Injects the full **Thinking** weights in the complement ($(I - P_S)(W_{\mathrm{swap}}) = (I - P_S)(W_{\mathrm{thinking}})$) **without** low-rank truncating $W_{\mathrm{thinking}}$.
+- **Null-space / orthogonal complement ($S^\perp$):** Injects the full **Thinking** weights outside $S$ ($(I - P_S)(W_{\mathrm{swap}}) = (I - P_S)(W_{\mathrm{thinking}})$) **without** low-rank truncating $W_{\mathrm{thinking}}$.
 - **Non-target tensors & metadata:** Embeddings, normalization layers, routers, and `lm_head` are copied from **Base**; `config.json`, tokenizer files, and the chat template are copied from **Thinking**.
 
 ---
@@ -24,6 +60,8 @@ $$
 
 ```text
 Spectral-Null-Space-Swap/
+├── assets/
+│   └── overview.png                    # Method overview & spectral space partition diagram
 ├── model/                              # Core Spectral Null Space Swap implementation
 │   ├── subspace_swap.py                # Single-ratio & shard-parallel checkpoint builder
 │   └── README.md                       # Layer selection rules, shard parallelism & stats schema
@@ -60,9 +98,9 @@ Spectral-Null-Space-Swap/
 
 ---
 
-## Installation
+## Setup
 
-Choose the environment profile that matches your workflow. Make sure your PyTorch / vLLM wheels match the host NVIDIA driver and CUDA toolkit.
+Choose the environment profile that matches your workflow. Ensure your PyTorch / vLLM wheels match the host NVIDIA driver and CUDA toolkit.
 
 ### 1. Standard Environment (Checkpoint Construction + Text/VL Evaluation)
 
@@ -217,3 +255,19 @@ See [`model/README.md`](model/README.md) and [`scripts/README.md`](scripts/READM
 - **Optional LLM verifier:** `grade.py` supports `opencompass/CompassVerifier-3B` fallback grading for responses that do not match symbolic rules; pass `--disable-verifier` for pure CPU rule grading, or `--model /path/to/CompassVerifier-3B --gpus 0` to enable it.
 
 For complete dataset schemas, custom benchmark setup, and Qwen3-Omni vLLM plugin configuration, see [`eval/README.md`](eval/README.md).
+
+---
+
+## Citation
+
+```bibtex
+@misc{ma2026s3spectralnullspaceswap,
+      title={$S^3$: Spectral Null-Space Swap Makes Reasoning Models Efficient}, 
+      author={Hongbo Ma and Sansheng Cao and Jiajun Fan and Bangji Yang and Ge Liu},
+      year={2026},
+      eprint={2609.37976},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2609.37976}, 
+}
+```

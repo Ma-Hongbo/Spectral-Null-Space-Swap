@@ -1,0 +1,33 @@
+# Isolated environment for Qwen3-Omni text and audio evaluation (eval/omni/)
+# Tested with Python 3.11 (3.11.15) on Linux with NVIDIA GPUs.
+#
+# Note:
+#   1. Do NOT mix this file into the main vLLM 0.11.2 environment; Qwen3-Omni
+#      relies on vLLM 0.9.2 + PyTorch 2.7.0 plus a Qwen3-Omni vLLM source checkout
+#      pointed to by QWEN_OMNI_VLLM_SOURCE.
+#   2. Audio decoding in gen_omni_audio_vllm.py also requires `ffmpeg` on PATH.
+#
+# Usage:
+#   conda create -n spectral-swap-omni python=3.11 -y
+#   conda activate spectral-swap-omni
+#   python -m pip install -r requirements/omni.txt
+
+# Core & inference stack
+torch==2.7.0
+transformers==4.57.6
+accelerate>=1.0.0
+huggingface-hub>=0.34.0
+vllm==0.9.2
+safetensors==0.8.0
+qwen-omni-utils==0.0.9
+pillow>=10.0.0
+numpy==2.2.6
+
+# Data handling & grading utilities
+datasets==4.4.2
+pyarrow==23.0.1
+pandas==3.0.1
+scipy==1.17.1
+sympy==1.14.0
+pylatexenc==2.10
+tqdm==4.70.0

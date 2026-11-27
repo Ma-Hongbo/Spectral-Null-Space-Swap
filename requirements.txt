@@ -1,38 +1,30 @@
-# Exact dependency snapshot for the main text/VL evaluation environment.
-# Tested Python version: 3.10.19
-# Install with: python -m pip install -r requirements.txt
+# Primary environment for checkpoint construction and Text / Vision-Language evaluation
+# Tested with Python 3.10 (3.10.19) on Linux with NVIDIA GPUs.
+#
+# Usage:
+#   python -m pip install -r requirements.txt
+#
+# Alternative profiles:
+#   - Weight construction only (no vLLM / grading stack): requirements/minimal.txt
+#   - Qwen3-Omni text & audio evaluation (Python 3.11):   requirements/omni.txt
 
-# Model construction and inference
+# Core checkpoint construction & tensor I/O
 torch==2.9.0
-transformers==4.57.5
-huggingface-hub==0.36.2
-vllm==0.11.2
 safetensors==0.7.0
 numpy==2.2.6
 
-# Evaluation, grading, and data preparation
-pandas==2.3.3
+# Model loading, Hub CLI, and GPU inference backends
+transformers==4.57.5
+accelerate>=1.0.0
+huggingface-hub==0.36.2
+vllm==0.11.2
+pillow>=10.0.0
+
+# Dataset preparation, symbolic math grading, and 3D IoU evaluation
+datasets==4.4.2
 pyarrow==23.0.1
+pandas==2.3.3
 scipy==1.15.3
 sympy==1.14.0
 pylatexenc==2.10
 tqdm==4.67.3
-datasets==4.4.2
-
-# Qwen3-Omni audio evaluation requires a separate environment because its
-# vLLM/PyTorch stack conflicts with the versions above. Use Python 3.11.15
-# and replace the corresponding packages with this tested snapshot:
-#
-# torch==2.7.0
-# transformers==4.57.6
-# vllm==0.9.2
-# safetensors==0.8.0
-# numpy==2.2.6
-# pandas==3.0.1
-# pyarrow==23.0.1
-# scipy==1.17.1
-# sympy==1.14.0
-# pylatexenc==2.10
-# tqdm==4.70.0
-# datasets==4.4.2
-# qwen-omni-utils==0.0.9

@@ -1,6 +1,8 @@
 __pycache__/
 *.py[cod]
+.DS_Store
 .venv/
 checkpoints/
 eval/data/
+references/
 results/

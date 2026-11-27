@@ -1,0 +1,13 @@
+# Minimal environment for checkpoint construction & weight merging only
+# Covers:
+#   - model/subspace_swap.py
+#   - scripts/build_*_sar_ratio_sweep.py
+#   - scripts/ties_merge_safetensors.py
+#
+# Usage:
+#   python -m pip install -r requirements/minimal.txt
+
+torch==2.9.0
+safetensors==0.7.0
+numpy==2.2.6
+huggingface-hub==0.36.2

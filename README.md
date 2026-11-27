@@ -1,136 +1,219 @@
 # Spectral Null Space Swap
 
-给定架构一致的 Instruct（Base）和 Thinking 检查点，本方法对目标权重矩阵构造
-$W_{\mathrm{swap}} = P_S(W_{\mathrm{base}}) + (I-P_S)(W_{\mathrm{thinking}})$。
-$S$ 由 Base 矩阵前 $k$ 个左右奇异向量定义，其中
-$k=\lceil \mathrm{ratio}\cdot\min(d_{out},d_{in})\rceil$。
-Base 提供主奇异子空间内的权重，Thinking 提供其正交补内的权重。
+**Spectral Null Space Swap** merges an architecture-matched **Instruct (Base)** checkpoint and **Thinking** checkpoint in weight space without low-rank truncation.
 
-## 快速开始
+For every target linear layer with Base weight $W_{\mathrm{base}} \in \mathbb{R}^{d_{\mathrm{out}} \times d_{\mathrm{in}}}$ and Thinking weight $W_{\mathrm{thinking}} \in \mathbb{R}^{d_{\mathrm{out}} \times d_{\mathrm{in}}}$, let $U_k \in \mathbb{R}^{d_{\mathrm{out}} \times k}$ and $V_k \in \mathbb{R}^{d_{\mathrm{in}} \times k}$ denote the top-$k$ left and right singular vectors of $W_{\mathrm{base}}$, where
 
-以下命令从仓库根目录执行。示例使用 Qwen3-4B Instruct/Thinking 2507 和 GSM8K，
-可以先评测 8 道题，再用同一流程跑全量对比。已有本地权重时，直接将变量指向模型目录即可。
+$$
+k = \max\!\left(1,\, \lceil \mathrm{ratio} \cdot \min(d_{\mathrm{out}}, d_{\mathrm{in}}) \rceil\right), \qquad \mathrm{ratio} \in (0, 1].
+$$
 
-### 1. 配置环境和模型
+Defining $P_S(W) = U_k U_k^\top W V_k V_k^\top$ as the orthogonal Frobenius projection onto the principal singular subspace $S = \mathrm{span}(U_k) \otimes \mathrm{span}(V_k)$, the merged weight is constructed as:
 
-文本和视觉评测使用 Linux、NVIDIA GPU 和 Python 3.10。依赖锁定在
-[requirements.txt](requirements.txt)，包括 PyTorch 2.9.0、Transformers 4.57.5 和 vLLM 0.11.2。
+$$
+W_{\mathrm{swap}} = P_S(W_{\mathrm{base}}) + (I - P_S)(W_{\mathrm{thinking}}).
+$$
+
+- **Principal subspace ($S$):** Preserves the exact leading spectral components of the **Base / Instruct** model ($P_S(W_{\mathrm{swap}}) = P_S(W_{\mathrm{base}})$).
+- **Orthogonal complement ($S^\perp$):** Injects the full **Thinking** weights in the complement ($(I - P_S)(W_{\mathrm{swap}}) = (I - P_S)(W_{\mathrm{thinking}})$) **without** low-rank truncating $W_{\mathrm{thinking}}$.
+- **Non-target tensors & metadata:** Embeddings, normalization layers, routers, and `lm_head` are copied from **Base**; `config.json`, tokenizer files, and the chat template are copied from **Thinking**.
+
+---
+
+## Repository Structure
+
+```text
+Spectral-Null-Space-Swap/
+├── model/                              # Core Spectral Null Space Swap implementation
+│   ├── subspace_swap.py                # Single-ratio & shard-parallel checkpoint builder
+│   └── README.md                       # Layer selection rules, shard parallelism & stats schema
+├── scripts/                            # Multi-ratio sweep builders & merging baselines
+│   ├── build_qwen3_4b_sar_ratio_sweep.py       # Single-SVD multi-ratio builder (Qwen3-4B)
+│   ├── build_qwen3_30b_a3b_sar_ratio_sweep.py  # Resumable multi-ratio builder (Qwen3-30B-A3B / Omni)
+│   ├── build_qwen3_vl_sar_ratio_sweep.py       # Resumable multi-ratio builder (Qwen3-VL)
+│   ├── ties_merge_safetensors.py               # Streaming TIES-Merging baseline for safetensors
+│   └── README.md                               # Usage guide for sweeps and TIES baseline
+├── eval/                               # Reproducible evaluation pipeline
+│   ├── prepare/                        # Dataset download & normalization into JSONL
+│   │   ├── prepare_gsm8k.py            # Export GSM8K test split
+│   │   ├── prepare_new_vl_benchmarks.py# Prepare MathVista-testmini & Omni3D ARKitScenes
+│   │   └── prepare_omni_audio_data.py  # Prepare MMAU, MMAR, and MMSU audio benchmarks
+│   ├── generate/                       # Text & Vision-Language rollout generation
+│   │   └── gen_vllm.py                 # Multi-GPU vLLM / Transformers runner
+│   ├── omni/                           # Qwen3-Omni text & audio rollout generation
+│   │   ├── gen_omni_vllm.py            # Resumable vLLM text runner for Qwen3-Omni
+│   │   ├── gen_omni_audio_vllm.py      # Resumable vLLM audio runner (FFmpeg + qwen-omni-utils)
+│   │   ├── gen_omni.py                 # Transformers fallback runner for Qwen3-Omni text
+│   │   ├── qwen3_omni_vllm_plugin.py   # vLLM 0.9.2 model-registry bridge for Qwen3-Omni
+│   │   └── sitecustomize.py            # Worker-spawn compatibility shim for vLLM 0.9.2 + TF 4.57
+│   ├── grade/                          # Rule-based, verifier-assisted & multimodal graders
+│   │   ├── grade.py                    # Math/Text/MMMU/LCB/BFCL grader (+ CompassVerifier)
+│   │   ├── grade_new_vl.py             # MathVista & ARKitScenes (9-DoF 3D IoU mAP@0.15) grader
+│   │   ├── grade_omni_audio.py         # Audio multiple-choice grader
+│   │   └── utils.py                    # Symbolic SymPy / LaTeX answer equivalence checker
+│   └── README.md                       # Detailed CLI reference, task formats & output schemas
+├── requirements.txt                    # Main environment (Text & VL build + evaluation, Python 3.10)
+└── requirements/
+    ├── minimal.txt                     # Lightweight environment (checkpoint construction only)
+    └── omni.txt                        # Isolated Qwen3-Omni environment (Python 3.11, vLLM 0.9.2)
+```
+
+---
+
+## Installation
+
+Choose the environment profile that matches your workflow. Make sure your PyTorch / vLLM wheels match the host NVIDIA driver and CUDA toolkit.
+
+### 1. Standard Environment (Checkpoint Construction + Text/VL Evaluation)
+
+Tested on Linux with NVIDIA GPUs and **Python 3.10** (`PyTorch 2.9.0`, `Transformers 4.57.5`, `vLLM 0.11.2`):
 
 ```bash
 git clone https://github.com/Ma-Hongbo/Spectral-Null-Space-Swap.git
 cd Spectral-Null-Space-Swap
+
 conda create -n spectral-swap python=3.10 -y
 conda activate spectral-swap
 python -m pip install -r requirements.txt
+```
 
+### 2. Minimal Environment (Weight Construction Only)
+
+If you only want to build swapped or TIES-merged checkpoints without installing vLLM or evaluation packages:
+
+```bash
+python -m pip install -r requirements/minimal.txt
+```
+
+### 3. Qwen3-Omni Environment (Audio & Omni Evaluation)
+
+Qwen3-Omni inference requires a **separate** Python 3.11 environment (`PyTorch 2.7.0`, `vLLM 0.9.2`) and `ffmpeg` on `PATH`:
+
+```bash
+conda create -n spectral-swap-omni python=3.11 -y
+conda activate spectral-swap-omni
+python -m pip install -r requirements/omni.txt
+```
+
+---
+
+## Quickstart
+
+Run all commands below from the **repository root**. This walkthrough builds a `ratio=0.5` checkpoint from `Qwen3-4B-Instruct-2507` and `Qwen3-4B-Thinking-2507`, verifies the pipeline on an 8-problem GSM8K smoke test, and then evaluates all three models head-to-head.
+
+### Step 1: Download Base and Thinking Checkpoints
+
+If you already have local Hugging Face checkpoints, point `BASE` and `THINKING` directly to their directories. Ensure sufficient disk space for one full output checkpoint per ratio.
+
+```bash
 BASE=checkpoints/Qwen3-4B-Instruct-2507
 THINKING=checkpoints/Qwen3-4B-Thinking-2507
 SWAP=checkpoints/Qwen3-4B-Swap-ratio-0.5
+
 hf download Qwen/Qwen3-4B-Instruct-2507 --local-dir "$BASE"
 hf download Qwen/Qwen3-4B-Thinking-2507 --local-dir "$THINKING"
 ```
 
-只构造权重时，可以在独立环境里安装 `torch==2.9.0` 和 `safetensors==0.7.0`。
-CUDA 安装方式取决于 NVIDIA 驱动和所用的 PyTorch/vLLM wheel。两份输入模型和一份构造结果各需要一份完整 checkpoint 的磁盘空间。
-
-### 2. 构造 Swap 模型
+### Step 2: Construct the Spectral Null Space Swap Checkpoint
 
 ```bash
 python model/subspace_swap.py \
-  --base "$BASE" --thinking "$THINKING" --out "$SWAP" \
-  --ratio 0.5 --device cuda:0
+  --base "$BASE" \
+  --thinking "$THINKING" \
+  --out "$SWAP" \
+  --ratio 0.5 \
+  --device cuda:0
 ```
 
-输出目录包含 safetensors、模型索引、Thinking 的配置和 tokenizer，以及
-`subspace_swap_stats.json`。检查其中的 `projected_matrices`、`max_subspace_error`
-和 `max_complement_error` 可以确认有目标矩阵被处理，并查看 FP32 投影误差。
-输出浮点权重保存为 FP16。
+When construction finishes, `$SWAP` is a drop-in Hugging Face checkpoint saved in `float16` alongside `subspace_swap_stats.json`. Check `projected_matrices`, `max_subspace_error`, and `max_complement_error` in `subspace_swap_stats.json` to confirm all target layers were decomposed cleanly in FP32.
 
-### 3. 评测构造后的模型
+> **Tip:** Full FP32 SVD is computed per target matrix regardless of `--ratio`. If GPU memory is tight on large models, pass `--device cpu` or parallelize across shards (see [`model/README.md`](model/README.md)).
 
-下载 [GSM8K](https://huggingface.co/datasets/openai/gsm8k) 的 `main/test`，
-转换成带最终答案指令的 JSONL。下面的冒烟评测每题生成一次，随后用 CPU 规则评分。
+### Step 3: Smoke-Test Generation & Rule-Based Grading on GSM8K
+
+Export the official GSM8K `test` split to `eval/data/GSM8K/test.jsonl`, generate 1 rollout on 8 examples, and grade with the symbolic rule checker:
 
 ```bash
-python eval/evals/prepare_gsm8k.py
+python eval/prepare/prepare_gsm8k.py
 
 OUT=results/smoke/GSM8K
-python eval/evals/gen_vllm.py \
-  --model "$SWAP" --tasks GSM8K --output-dir "$OUT" \
-  --backend vllm --gpus 0 --dtype float16 \
-  --limit 8 --seeds 101 --max-tokens 2048 --max-model-len 4096
+python eval/generate/gen_vllm.py \
+  --model "$SWAP" \
+  --tasks GSM8K \
+  --output-dir "$OUT" \
+  --backend vllm \
+  --gpus 0 \
+  --dtype float16 \
+  --limit 8 \
+  --seeds 101 \
+  --max-tokens 2048 \
+  --max-model-len 4096
 
-python eval/evals/grade.py --eval-dir "$OUT" --disable-verifier --write-details
+python eval/grade/grade.py \
+  --eval-dir "$OUT" \
+  --disable-verifier \
+  --write-details
 ```
 
-生成目录包含回答 JSONL 和 `generation_manifest.json`。评分写入
-`grading_results.json`，可查看 `avg_at_n`（平均 rollout 正确率）、
-`pass_at_n`（至少一次答对的题目占比）、`avg_token_length` 和 `truncation_rate`。
-`--write-details` 另外输出逐题评分。冒烟评测只用于检查流程，较短的生成上限可能截断 Thinking 输出。
+Inspect `$OUT/grading_results.json` for `avg_at_n` (mean rollout accuracy), `pass_at_n` (fraction of problems solved by at least one seed), `avg_token_length`, and `truncation_rate`. (`--max-tokens 2048` is intentionally short for a quick pipeline check and may truncate long reasoning chains.)
 
-### 4. 在同一设置下比较三种模型
+### Step 4: Full Head-to-Head Comparison (Instruct vs. Thinking vs. Swap)
 
-下例使用全量 GSM8K、四个种子和相同的生成预算。可以按显存调整 `--max-model-len`
-和 `--max-tokens`，为输入提示留出上下文空间。对比时三种模型使用同一设置和评分方式。
+Evaluate all three checkpoints on the full GSM8K benchmark across four seeds (`101,202,303,404`) under identical decoding budgets:
 
 ```bash
 for variant in instruct thinking swap; do
   case "$variant" in
     instruct) MODEL="$BASE" ;;
     thinking) MODEL="$THINKING" ;;
-    swap) MODEL="$SWAP" ;;
+    swap)     MODEL="$SWAP" ;;
   esac
   OUT="results/Qwen3-4B/$variant/GSM8K"
-  python eval/evals/gen_vllm.py \
-    --model "$MODEL" --tasks GSM8K --output-dir "$OUT" \
-    --backend vllm --gpus 0 --dtype float16 \
-    --seeds 101,202,303,404 --max-tokens 32768 --max-model-len 40960 || break
-  python eval/evals/grade.py --eval-dir "$OUT" --disable-verifier || break
+  python eval/generate/gen_vllm.py \
+    --model "$MODEL" \
+    --tasks GSM8K \
+    --output-dir "$OUT" \
+    --backend vllm \
+    --gpus 0 \
+    --dtype float16 \
+    --seeds 101,202,303,404 \
+    --max-tokens 32768 \
+    --max-model-len 40960 || break
+  python eval/grade/grade.py --eval-dir "$OUT" --disable-verifier || break
 done
 ```
 
-## 评测入口
+---
 
-| 用途 | 入口 |
-| --- | --- |
-| 文本与视觉生成 | [gen_vllm.py](eval/evals/gen_vllm.py)，支持 vLLM 和 Transformers |
-| 文本、数学与 MMMU 评分 | [grade.py](eval/evals/grade.py)，支持规则评分和 CompassVerifier |
-| MathVista / ARKitScenes | [prepare_new_vl_benchmarks.py](eval/evals/prepare_new_vl_benchmarks.py) 准备输入，[grade_new_vl.py](eval/evals/grade_new_vl.py) 评分 |
-| Qwen3-Omni | [gen_omni_vllm.py](eval/evals/gen_omni_vllm.py) 生成文本，[gen_omni_audio_vllm.py](eval/evals/gen_omni_audio_vllm.py) 生成音频任务答案，[grade_omni_audio.py](eval/evals/grade_omni_audio.py) 评分 |
+## Checkpoint Construction & Sweeps
 
-其他 benchmark 可通过 `--tasks AIME25 --task-path AIME25=/path/to/test.jsonl`
-指定输入。通用生成器接受 JSONL、JSON 和 Parquet。简单文本样本可用
-`{"question":"What is 2 + 2?","answer":"4"}`，也支持 chat `messages`。
-视觉任务用 `--modality VL`，并为本地 `file://` 图片设置
-`--allowed-local-media-path /path/to/images`。启动 GPU 推理前可在生成命令后加
-`--dry-run`，检查样本数、设备和解码配置。
+| Task | Script | Highlights |
+| --- | --- | --- |
+| Single-ratio swap (single or multi-GPU shard parallel) | [`model/subspace_swap.py`](model/subspace_swap.py) | Supports single-file & sharded `safetensors`; dense, MoE, and Qwen3-VL layers |
+| Qwen3-4B multi-ratio sweep | [`scripts/build_qwen3_4b_sar_ratio_sweep.py`](scripts/build_qwen3_4b_sar_ratio_sweep.py) | Computes SVD **once** per matrix and emits all requested ratios in one pass |
+| Qwen3-30B-A3B / Qwen3-Omni sweep | [`scripts/build_qwen3_30b_a3b_sar_ratio_sweep.py`](scripts/build_qwen3_30b_a3b_sar_ratio_sweep.py) | Shard-resumable, preserves source dtype, handles Omni Instruct-only talker weights |
+| Qwen3-VL multi-ratio sweep | [`scripts/build_qwen3_vl_sar_ratio_sweep.py`](scripts/build_qwen3_vl_sar_ratio_sweep.py) | Swaps both language and vision (`qkv`, `proj`, `linear_fc1/2`) target matrices |
+| Streaming TIES-Merging baseline | [`scripts/ties_merge_safetensors.py`](scripts/ties_merge_safetensors.py) | Two-pass shard-streaming TIES merge without loading 30B checkpoints into RAM |
 
-`--gpus` 接收物理 GPU 编号，默认 `0`。`--gpus 0,1 --tp 2` 将一个
-vLLM 实例分配到两张卡，`--gpus 0,1 --tp 1` 则将样本分给两个实例。
-若使用原实验允许范围之外的编号，显式传入 `--allow-other-gpus`。
-重跑相同输出可指定新目录，或用 `--overwrite` 替换已有生成。
+See [`model/README.md`](model/README.md) and [`scripts/README.md`](scripts/README.md) for target-weight rules, parallel shard commands, and CLI options.
 
-默认评分可在规则未判对时使用 CompassVerifier。快速开始显式关闭它；需要使用
-verifier 时，可运行 `CUDA_VISIBLE_DEVICES=0 python eval/evals/grade.py --eval-dir "$OUT" --model /path/to/CompassVerifier-3B`。
-LiveCodeBench 和 BFCL 的官方评分还需要在 `references/LiveCodeBench` 和
-`references/gorilla` 分别准备对应上游评测代码和依赖。
+---
 
-Omni 专用 runner 使用 `requirements.txt` 末尾记录的独立环境。将
-`QWEN_OMNI_VLLM_SOURCE` 指向包含
-`vllm/model_executor/models/qwen3_omni_moe_thinker.py` 的源码 checkout，
-启动时将 `eval/evals` 加入 `PYTHONPATH`，以便 vLLM worker 加载兼容代码。
-音频输入可用 [prepare_omni_audio_data.py](eval/evals/prepare_omni_audio_data.py) 的
-`--audio-root`、`--only` 和 `--prepared-root` 指定数据及输出位置。运行音频生成需要系统提供
-FFmpeg。音频评分通过 `--input` 接收生成的 JSONL 文件。
+## Evaluation Overview
 
-## 权重构造与实验脚本
+| Modality / Benchmark | Data Preparation | Generation | Grading |
+| --- | --- | --- | --- |
+| **Text & Math** (`GSM8K`, `AIME24/25/26`, `MATH-500`, `HMMT25`, `Olympiad-Bench`, `MMLU-Pro`, `ARC-C`, etc.) | [`prepare_gsm8k.py`](eval/prepare/prepare_gsm8k.py) or `--task-path TASK=FILE` | [`gen_vllm.py`](eval/generate/gen_vllm.py) | [`grade.py`](eval/grade/grade.py) |
+| **Code & Tool Use** (`LiveCodeBench`, `BFCL`) | Custom JSONL / Parquet via `--task-path` | [`gen_vllm.py`](eval/generate/gen_vllm.py) | [`grade.py`](eval/grade/grade.py) (with `references/LiveCodeBench` or `references/gorilla`) |
+| **Vision-Language** (`MMMU`, `MathVista-testmini`, `ARKitScenes`) | [`prepare_new_vl_benchmarks.py`](eval/prepare/prepare_new_vl_benchmarks.py) | [`gen_vllm.py`](eval/generate/gen_vllm.py) (`--modality VL`) | [`grade.py`](eval/grade/grade.py) (`MMMU`) / [`grade_new_vl.py`](eval/grade/grade_new_vl.py) (`MathVista`, `ARKitScenes`) |
+| **Qwen3-Omni Text** (`MMLU`, `GSM8K`) | JSONL question/answer file | [`gen_omni_vllm.py`](eval/omni/gen_omni_vllm.py) or [`gen_omni.py`](eval/omni/gen_omni.py) | [`grade.py`](eval/grade/grade.py) |
+| **Qwen3-Omni Audio** (`MMAU`, `MMAR`, `MMSU`) | [`prepare_omni_audio_data.py`](eval/prepare/prepare_omni_audio_data.py) | [`gen_omni_audio_vllm.py`](eval/omni/gen_omni_audio_vllm.py) | [`grade_omni_audio.py`](eval/grade/grade_omni_audio.py) |
 
-`model/subspace_swap.py` 支持单文件和分片的 Hugging Face safetensors 模型。
-它处理同名同形状的 Attention、MLP（含 MoE experts）和 Qwen3-VL Vision
-目标矩阵。其余权重取自 Base，配置和 tokenizer 取自 Thinking。请为每组输入和
-ratio 使用独立输出目录。`ratio=1` 取全部可用奇异方向；矩形矩阵仍可能存在正交补。
+### Key Operational Notes
 
-- 单卡显存不足时，可用 `--device cpu`。构造时对每个目标矩阵运行完整 FP32 SVD，降低 ratio 不会降低这一步的主要开销。
-- 分片并行时，启动多个进程，每个进程使用相同的 Base、Thinking、ratio 和输出目录，并指定不同的 `--only-shard <索引中的完整分片名> --skip-finalize`。所有进程成功后，用同样的参数运行一次 `--finalize-only`，生成模型索引和合并后的统计。
-- [scripts/](scripts/) 下的 `build_*_sar_ratio_sweep.py` 用于一次构造多个 ratio，支持 Qwen3-4B、Qwen3-30B-A3B 和 Qwen3-VL。用对应脚本的 `--help` 查看输入和 GPU 参数。
-- [scripts/archive/](scripts/archive/) 保存原实验的单机队列和控制器，其中有实验机路径、GPU 编号和矩阵更新约定。[eval/legacy/](eval/legacy/) 保存旧的顺序生成、LoRA 和 exam 入口。
+- **Multi-GPU data vs. tensor parallelism:** In `eval/generate/gen_vllm.py`, `--gpus 0,1 --tp 2` shards one vLLM engine across two GPUs, whereas `--gpus 0,1 --tp 1` launches two data-parallel engines over disjoint prompt shards.
+- **GPU allow-list guard:** `gen_vllm.py` and `grade.py` include a cluster safety allow-list (`{0,1,2,3,5,6,7,8,9}`). Pass `--allow-other-gpus` whenever targeting physical GPU `4` or device IDs `>= 10`.
+- **Dry-run inspection:** Append `--dry-run` to `gen_vllm.py` to print the resolved dataset path, example count, decoding hyperparameters, and output manifest without initializing CUDA.
+- **Optional LLM verifier:** `grade.py` supports `opencompass/CompassVerifier-3B` fallback grading for responses that do not match symbolic rules; pass `--disable-verifier` for pure CPU rule grading, or `--model /path/to/CompassVerifier-3B --gpus 0` to enable it.
+
+For complete dataset schemas, custom benchmark setup, and Qwen3-Omni vLLM plugin configuration, see [`eval/README.md`](eval/README.md).
